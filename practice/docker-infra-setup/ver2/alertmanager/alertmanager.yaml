@@ -1,0 +1,17 @@
+global:
+  slack_api_url: '' # 해당 주소의 경우 slack알람의 webhook를 통해 받아온다.
+  resolve_timeout: 1m
+
+route:
+  receiver: 'project1'
+  group_by: ['service']
+  group_wait: 10s #알람이 주기 전 초기 대기시간
+  group_interval: 10s # 새로운 경고에 대한 알림을 보내기 전 기다려야하는 시간
+  repeat_interval: 1m # 확인 주기 시간
+
+receivers:
+  - name: 'project1' #마음대로 붙여도 된다.
+    slack_configs:
+    - channel: 'skill-up' #slack에 실제 채널의 이름을 정확하게 입력해야한다. public이면 #도 붙여야한다.
+      send_resolved: true
+      text: "summary: {{ .CommonAnnotations.summary }}\ndescription: {{ .CommonAnnotations.description }}"

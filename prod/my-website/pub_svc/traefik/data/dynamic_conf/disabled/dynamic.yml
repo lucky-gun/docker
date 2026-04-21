@@ -1,0 +1,264 @@
+http:
+  routers:
+
+    #####################      
+    ### 외부 상시 개방 ##
+    #####################
+
+
+    ### HTTP ➡  HTTPS ###
+
+
+    external-nextcloud:
+      entryPoints:
+        - web
+      rule: "Host(`cloud.lucky-gun.com`)"
+      middlewares:
+        - redirect-to-https@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      observability:
+        accessLogs: false
+
+    external-mediawiki:
+      entryPoints:
+        - web
+      rule: "Host(`wiki.lucky-gun.com`)"
+      middlewares:
+        - redirect-to-https@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      observability:
+        accessLogs: false
+
+    external-wordpress:
+      entryPoints:
+        - web
+      rule: "Host(`lucky-gun.com`) || Host(`www.lucky-gun.com`)"
+      middlewares:
+        - redirect-to-https@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      observability:
+        accessLogs: false
+
+    external-grafana:
+      entryPoints:
+        - web
+      rule: "Host(`grafana.lucky-gun.com`)"
+      middlewares:
+        - redirect-to-https@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      observability:
+        accessLogs: false
+
+    www-canonical-redirect:
+      entryPoints: [websecure]
+      rule: "Host(`www.lucky-gun.com`)"
+      priority: 1000
+      middlewares:
+        - redirect-www-to-apex@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+      observability:
+        accessLogs: false
+
+
+    ### NEXTCLOUD ###
+
+
+    external-nextcloud-login-secure:
+      entryPoints:
+        - websecure
+      rule: >
+        Host(`cloud.lucky-gun.com`) &&
+        (Path(`/login`) || Path(`/index.php/login`))
+      priority: 210
+      middlewares:
+        - rate-limit-login@file
+        - secure-headers-nc@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    # 2) notify_push(WebSocket) 전용 (사용 중일 때)
+    external-nextcloud-push-secure:
+      entryPoints:
+        - websecure
+      rule: Host(`cloud.lucky-gun.com`) && (PathPrefix(`/push`) || PathPrefix(`/index.php/push`))
+      priority: 205
+      # 별도 rate-limit는 상황에 따라(보통 불필요)
+      middlewares:
+        - secure-headers-nc@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-nolimit-upload-nextcloud-secure:
+      entryPoints:
+        - websecure
+      rule: >
+        Host(`cloud.lucky-gun.com`) &&
+        (Path(`/index.php/core/preview.png`) ||
+         Path(`/index.php/apps/files/ajax/upload.php`) ||
+         PathPrefix(`/remote.php/dav/`))
+      priority: 200
+      middlewares:
+        - secure-headers-nc@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-nolimit-ocs-nextcloud-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`cloud.lucky-gun.com`) && (PathPrefix(`/ocs/v1.php/apps`) || PathPrefix(`/ocs/v2.php/apps`) || PathPrefix(`/index.php/settings/apps`) || PathPrefix(`/ocs/v1.php/cloud/users`) || PathPrefix(`/ocs/v2.php/cloud/users`) || PathPrefix(`/index.php/settings/users`) || PathPrefix(`/index.php/settings/admin`))"
+      priority: 190
+      middlewares:
+        - secure-headers-nc@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-nextcloud-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`cloud.lucky-gun.com`)"
+      priority: 100
+      middlewares:
+        - rate-limit@file
+        - secure-headers-nc@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+
+    ### Wiki ###   
+
+
+    external-mediawiki-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`wiki.lucky-gun.com`)"
+      middlewares:
+        - rate-limit@file
+        - secure-headers-mw@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+        
+    ### wordpress ###
+
+
+    external-assets-nolimit-wordpress-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`lucky-gun.com`) && (PathPrefix(`/wp-content/`) || PathPrefix(`/wp-includes/`))"
+      priority: 200
+      middlewares:
+        - secure-headers-wp@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-admin-wordpress-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`lucky-gun.com`) && (Path(`/wp-login.php`) || PathPrefix(`/wp-admin/`))"
+      priority: 300
+      middlewares:
+        - only-cloudflare@file
+          #- ip-whitelist@file
+        - secure-headers-wp@file
+        - rate-limit-login@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-default-wordpress-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`lucky-gun.com`)"
+      priority: 100
+      middlewares:
+        - only-cloudflare@file
+        - rate-limit@file
+        - secure-headers-wp@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+
+    ### grafana ###
+
+
+    external-grafana-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`grafana.lucky-gun.com`)"
+      middlewares:
+        - only-cloudflare@file
+        - rate-limit@file
+        - secure-headers-gf@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-grafana-login-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`grafana.lucky-gun.com`) && (PathPrefix(`/login`) || PathPrefix(`/api/login`) || PathPrefix(`/admin`))"
+      middlewares:
+        - rate-limit-login@file
+        - secure-headers-gf@file
+        - only-cloudflare@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    external-grafana-admin-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`grafana.lucky-gun.com`) && PathPrefix(`/api/admin`)"
+      middlewares:
+        - only-cloudflare@file
+        - ip-whitelist@file
+        - secure-headers-gf@file
+      service: http-through-modsec@file
+      tls:
+        certResolver: myresolver
+
+    ################################    
+    ## metrics값 수집 (상시 사용) ##
+    ################################    
+
+    external-nodeexporter-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`nodeexporter.lucky-gun.com`)"
+      service: nodeexporter_service@file
+      tls:
+        certResolver: myresolver
+      observability:
+        accessLogs: false
+
+    external-cadvisor-secure:
+      entryPoints:
+        - websecure
+      rule: "Host(`cadvisor.lucky-gun.com`)"
+      service: cadvisor_service@file
+      tls:
+        certResolver: myresolver
+      observability:
+        accessLogs: false

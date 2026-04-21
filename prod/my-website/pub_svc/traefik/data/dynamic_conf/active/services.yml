@@ -1,0 +1,65 @@
+http:
+  services:
+
+    #####################
+    ### 외부 상시 개방 ##
+    #####################
+
+    http-through-modsec:
+      loadBalancer:
+        servers:
+          - url: "http://my_modsec:80"
+        passHostHeader: true
+
+
+    #############################    
+    ## infra 확인 필요 시 사용 ##
+    #############################
+
+    portainer-service:
+      loadBalancer:
+        servers:
+          - url: "http://10.0.2.100:9000"
+
+    dbgate_service:
+      loadBalancer:
+        servers:
+          - url: "http://10.0.2.100:3000"
+
+    cockpit_service:
+      loadBalancer:
+        servers:
+          - url: "https://10.0.0.100:9090"
+        passHostHeader: true
+        serversTransport: cockpit_insecure_transport
+
+    cockpit2_service:
+      loadBalancer:
+        servers:
+          - url: "https://10.0.2.100:9090"
+        passHostHeader: true
+        serversTransport: cockpit_insecure_transport
+
+
+    ################################    
+    ## metrics값 수집 (상시 사용) ##
+    ################################ 
+
+    nodeexporter_service:
+      loadBalancer:
+        servers:
+          - url: "http://my_node_exporter:9100"
+
+    cadvisor_service:
+      loadBalancer:
+        servers:
+          - url: "http://my_cadvisor:8080"
+
+    fake-404:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:65535"
+
+  serversTransports:
+    cockpit_insecure_transport:
+      insecureSkipVerify: true

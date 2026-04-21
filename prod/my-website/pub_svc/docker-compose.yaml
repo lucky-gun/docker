@@ -1,0 +1,206 @@
+services:
+  my_traefik:
+    image: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8082:8082"
+    environment:
+      - CF_DNS_API_TOKEN=
+      - TZ=Asia/Seoul
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/log:/var/log/traefik
+      - ./traefik/data:/etc/traefik
+    networks:
+      - frontend
+      - security
+      - monitoring
+
+  my_wordpress:
+    image: wordpress
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/run/apache2
+    env_file: ./wordpress/.env
+    volumes:
+      - ./wordpress/data:/var/www/html
+    networks:
+      - frontend
+
+  my_mediawiki:
+    build:
+      context: ./mediawiki
+      dockerfile: Dockerfile_mediawiki
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/run/apache2
+    environment:
+      - MW_REDIS_PASSWORD=
+      - TZ=Asia/Seoul
+    volumes:
+      - mw_html:/var/www/html
+      - ./mediawiki/delete:/var/www/html/delete
+      - ./mediawiki/images:/var/www/html/images
+      - ./mediawiki/my_apcu.ini:/usr/local/etc/php/conf.d/my_apcu.ini:ro
+      # - ./mediawiki/LocalSettings.php:/var/www/html/LocalSettings.php:ro
+      #  https://github.com/AirHelp/mediawiki-docker/blob/master/README.md
+      #  볼륨 먼저 생성 시 덮어쓰기로 인해 안의 파일들이 모두 삭제되어
+      #  먼저 생성 후 다시 복사/붙여넣기 진행 필요
+    networks:
+      - frontend
+
+  my_cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    restart: unless-stopped
+    privileged: true
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run
+      - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro         # cgroups v2 환경이면 이 줄도 유용
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro       # ★ 추가
+    networks:
+      - monitoring
+
+  my_node_exporter:
+    image: prom/node-exporter
+    restart: unless-stopped
+    pid: "host"
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /run/udev:/run/udev:ro          # ← 추가: 호스트 udev DB
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--path.udev.data=/run/udev/data" # ← (선택) 경로 명시
+    networks:
+      - monitoring
+
+  my_modsec:
+    build:
+      context: ./modsecurity
+      dockerfile: Dockerfile_modsecurity
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./modsecurity/data/modsecurity.conf:/etc/modsecurity/modsecurity.conf
+      - ./modsecurity/data/local-whitelist.conf:/etc/modsecurity/local-whitelist.conf
+      - ./modsecurity/data/whitelist_admin_ips.txt:/etc/modsecurity/whitelist_admin_ips.txt
+      - ./modsecurity/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./modsecurity/nginx/apps.conf:/etc/nginx/conf.d/apps.conf
+      - ./modsecurity/log:/var/log/modsecurity
+    depends_on:
+      - my_mediawiki
+    networks:
+      - security
+      - frontend
+
+  my_fail2ban:
+    image: linuxserver/fail2ban
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - VERBOSITY=-vv
+      - TZ=Asia/Seoul
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./fail2ban/config:/config
+      - ./fail2ban/data/action.d:/config/fail2ban/action.d
+      - ./fail2ban/data/filter.d:/config/fail2ban/filter.d
+      - ./fail2ban/data/jail.d:/config/fail2ban/jail.d
+      - ./fail2ban/data/jail.local:/config/fail2ban/jail.local
+      - ./traefik/log:/config/log/traefik:rw
+      - ./modsecurity/log:/config/log/modsecurity:rw
+
+  my_alloy:
+    image: grafana/alloy
+    restart: unless-stopped
+    user: root
+    cap_add:
+      - SYSLOG
+    environment:
+      - TZ=Asia/Seoul
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.river
+    volumes:
+      - ./alloy/config.river:/etc/alloy/config.river:ro
+      - ./alloy/data:/var/lib/alloy/data
+
+      # ModSecurity 로그
+      - ./modsecurity/log/audit.log:/var/log/modsecurity/audit.log:ro
+
+      # Fail2Ban 로그
+      - ./fail2ban/config/log/fail2ban/fail2ban.log:/var/log/fail2ban/fail2ban.log:ro
+
+      # Traefik 로그
+      - ./traefik/log/access.log:/var/log/traefik/access.log:ro
+    networks:
+      - monitoring
+      - frontend
+
+  my_portainer_agent:
+    image: portainer/agent
+    restart: unless-stopped
+    ports:
+      - "9001:9001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+      - /:/host
+    networks:
+      - frontend
+
+volumes:
+  mw_html: {}
+
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+    internal: false
+
+  monitoring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+    internal: true
+
+  security:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.24.0.0/24
+    internal: true

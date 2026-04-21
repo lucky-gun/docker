@@ -1,0 +1,81 @@
+version: "3.8"
+services:
+  proxy:
+    image: nginx:1.21.5-alpine
+    ports:
+      - 80:80
+      - 443:443
+    restart: unless-stopped
+    volumes:
+      - ./proxy/default.conf:/etc/nginx/conf.d/default.conf
+      - ./certbot/snippets:/etc/nginx/snippets
+      - ./certbot/letsencrypt:/etc/letsencrypt
+      - ./proxy/html:/var/www/html
+    container_name: my_proxy #(단, 서비스로 사용 시[도커 스웜] 무시되어집니다. 필요없어집니다) 단일로 구성했을 경우 필요합니다.
+    depends_on:
+      - nginx
+      - wordpress
+ 
+  php:
+    image: php:7.4-fpm
+    container_name: my_php
+    volumes:
+      - ./nginx/html:/var/www/html
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "security.limit_extensions = .php .phtml .php3 .php4 .php5 .html .htm" >> /usr/local/etc/php-fpm.d/www.conf
+        php-fpm
+ 
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/html:/var/www/html
+    container_name: my_nginx
+    depends_on:
+      - php
+    
+  db:
+    image: mysql:latest
+    volumes:
+    - ./db/conf.d:/etc/mysql/conf.d
+    env_file: ./db/.env
+    environment:
+      TZ: Asia/Seoul
+    container_name: my_mysqldb
+ 
+  wordpress:
+    depends_on:
+      - db
+    image: wordpress:latest
+    environment: #이상한 것은 .env_file이 작동되지 않습니다.
+      TZ: Asia/Seoul
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - ./wordpress/html:/var/www/html
+    container_name: my_wordpress
+ 
+  certbot:
+    image: certbot/certbot
+    container_name: my_certbot
+    depends_on:
+      - proxy
+    volumes:
+      - ./certbot/letsencrypt:/etc/letsencrypt
+      - ./proxy/html:/var/www/html
+      - ./certbot/log:/var/log/letsencrypt
+    command: certonly --dry-run --agree-tos --no-eff-email --email myemail@gmail.com --webroot --webroot-path=/var/www/html --force-renewal -d [my-domain] -d www.[my-domain]
+ 
+  flask:
+    build: ./flask
+    image: project1/flask
+    restart: always
+    volumes:
+      - ./flask/log:/usr/src/program/log
+    container_name: my_flask
+    command: gunicorn -w 1 -b 0.0.0.0:80 wsgi:server

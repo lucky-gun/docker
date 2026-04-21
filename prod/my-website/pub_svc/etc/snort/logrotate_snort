@@ -1,0 +1,23 @@
+/var/log/snort/alert.full {
+    daily
+    rotate 3             # 3일치만 보관
+    maxsize 100M         # 파일이 100MB 넘으면 즉시 회전
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate         # Snort에 신호 보내지 않고 안전하게 잘라냄
+    create 0640 snort adm
+}
+
+/var/log/snort/alert.fast {
+    daily
+    rotate 7             # 7일치 보관
+    maxsize 50M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0640 snort adm
+}

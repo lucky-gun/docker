@@ -1,0 +1,39 @@
+curl "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+     -H "Authorization: Bearer
+
+# traefik static (예시)
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: redact
+      names:
+        Authorization: redact
+        Cookie: redact
+        Set-Cookie: keep # 필요시 key/value 마스킹 플러그인 고려
+
+  # ACME HTTP challenge 처리용 (필수)
+    acme-challenge:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/.well-known/acme-challenge/`)"
+      service: acme-http@internal
+      priority: 10000
+
+http:
+  routers:
+    dummy-wildcard-cert:
+      rule: "Host(`lucky-gun.com`)"
+      entryPoints:
+        - websecure
+      service: dummy_service
+      tls:
+        certResolver: myresolver
+
+  services:
+    dummy_service:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal"

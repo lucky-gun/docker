@@ -1,0 +1,16 @@
+FROM mediawiki:latest
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $PHPIZE_DEPS; \
+    pecl install igbinary; \
+    docker-php-ext-enable igbinary; \
+    pecl install redis; \
+    docker-php-ext-enable redis; \
+    # (선택) APCu도 쓰면 CACHE_ACCEL에 좋음
+    # pecl install apcu && docker-php-ext-enable apcu; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false $PHPIZE_DEPS; \
+    rm -rf /var/lib/apt/lists/* /tmp/pear
+
+# (선택) igbinary를 기본 직렬화기로 강제
+# RUN echo 'redis.serializer=igbinary' > /usr/local/etc/php/conf.d/zz-redis.ini

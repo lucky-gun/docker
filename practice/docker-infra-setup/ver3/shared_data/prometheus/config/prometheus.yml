@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s  # 15초마다 매트릭을 수집한다. 기본은 1분
+  evaluation_interval: 15s # 15초마다 규칙을 평가한다. 기본은 1분
+  
+rule_files:
+  - 'rules.yaml'
+  
+scrape_configs:
+  
+# 매니저 구성  (master 본인 자기 자신의 서버를 확인) - 자기 자신의 host 및 container를 확인할 수 있어야한다.
+  - job_name: 'manager'
+    static_configs:
+    - targets: ['10.0.3.215:9100']
+      labels:
+        service : 'manager'
+  
+  - job_name: 'manager_container'
+    static_configs:
+    - targets: ['10.0.3.215:8081']
+      labels:
+        service : 'manager_container'
+ 
+# 워커 구성  (node 모니터링 대상 확인)
+  - job_name: 'worker'
+    static_configs: # 실제 수집 대상을 지정한다.
+    - targets: ['10.0.2.142:9100']
+      labels:
+        service : 'worker01'
+    - targets: ['10.0.1.246:9100']
+      labels:
+        service : 'worker02'
+  
+  - job_name: 'worker_container'
+    static_configs:
+    - targets: ['10.0.2.142:8081'] #8080포트를 많이 사용하기에 8081 포트로 사용하였다.
+      labels:
+        service : 'worker01_container'
+    - targets: ['10.0.1.246:8081']
+      labels:
+        service : 'worker02_container'
+  
+alerting:
+  alertmanagers:
+  - scheme: http  #위와 같이 설정을 해놓은 사항이다. 기본값에 맞춤
+    static_configs:
+    - targets:
+      - 10.0.3.215:9093
+# alert이 올 경우 누구한테 보내겠는가에 대한 설정이다. (타겟 설정) 모니터링 대상 설정

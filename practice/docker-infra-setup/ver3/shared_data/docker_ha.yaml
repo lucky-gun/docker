@@ -1,0 +1,155 @@
+services:
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/letsencrypt:/etc/letsencrypt
+      - ./certbot/log:/var/log/letsencrypt
+      - ./proxy/html:/var/www/html
+    command: certonly --dry-run --agree-tos --no-eff-email --email myemail@gmail.com --webroot --webroot-path=/var/www/html --force-renewal -d lucky-gun.com -d www.lucky-gun.com
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+      mode: global
+    networks:
+      - network
+
+  proxy:
+    image: nginx:1.21.5-alpine
+    volumes:
+      - ./proxy/default.conf:/etc/nginx/conf.d/default.conf
+      - ./certbot/snippets:/etc/nginx/snippets
+      - ./certbot/letsencrypt:/etc/letsencrypt
+      - ./proxy/html:/var/www/html
+    ports:
+      - 80:80
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+    networks:
+      - network
+
+  nginx:
+    image: luckygun/docker-project1:nginx
+    deploy:
+      mode: global
+    networks:
+      - network
+
+  php:
+    image: luckygun/docker-project1:php
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+    networks:
+      - network
+
+  flask:
+    image: luckygun/docker-project1:flask
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+    networks:
+      - network  
+
+  db:
+    image: luckygun/docker-project1:db
+    env_file: ./db/.mysqlenv
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5 
+    networks:
+      - network
+
+  wordpress:
+    image: luckygun/docker-project1:word
+    env_file: ./db/.wordenv
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    networks:
+      - network
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+        #- ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+    networks:
+      - network
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/config:/etc/prometheus
+      - ./prometheus/data:/prometheus
+    deploy:
+      mode: global
+    networks:
+      - network
+
+  alertmanager:
+    image: prom/alertmanager
+    ports:
+      - 9093:9093
+    volumes:
+      - ./alertmanager/alertmanager.yaml:/etc/alertmanager/alertmanager.yaml
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+    networks:
+      - network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro #기본적으로 잡혀있는 볼륨의 값들이다. 해당 값을 통해 metric값을 가져온다.
+      - /:/rootfs:ro
+      - /var/run:/var/run
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro #ro : readonly
+      - /dev/disk:/dev/disk:ro
+    ports:
+      - target: 8080   # 어느 포트로 포워딩할 것인가?
+        published: 8081
+        protocol: tcp
+        mode: host
+    deploy:
+      mode: global
+    networks:
+      - network
+
+  node_exporter:
+    image: prom/node-exporter
+    ports:
+      - target: 9100
+        published: 9100
+        protocol: tcp
+        mode: host
+    deploy:
+      mode: global
+    networks:
+      - network
+
+networks:
+  network:
+    driver: overlay

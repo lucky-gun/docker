@@ -1,0 +1,16 @@
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+
+
+bantime  = 1h
+backend = auto
+findtime = 10m
+maxretry = 6
+ignoreself = true
+usedns   = no
+#banaction= cft-backup
+#bantime.increment = true
+#bantime.factor    = 1.8
+#bantime.formula   = bantime * (1 + (attempts - 1) * factor)
+#bantime.overalljails = true
+#ignoreolder= 5m

@@ -1,0 +1,4 @@
+FROM mysql:latest
+
+WORKDIR /etc/mysql/conf.d
+COPY ./conf.d/ .

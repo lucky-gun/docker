@@ -1,0 +1,11 @@
+groups:
+  - name: projectrule 
+    rules:
+    - alert: InstanceDown
+      expr: up == 0  #VM이 다운되었을 경우 (중지되었을 때)
+      for: 1m #1분마다
+      labels:
+        severity: "critical" #알람에서의 기준점 정하기 (심각성 기준 - 크리티컬)
+      annotations:
+        summary: "EndPoint {{ $labels.service }} down"
+        description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minutes"

@@ -1,0 +1,62 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: "slack-default"
+  group_by: ['service','alertname']
+  group_wait: 2m # 10s
+  group_interval: 15m # 10s 
+  repeat_interval: 4h   # 기본(기타용). 인프라/SecOps는 아래 하위 라우트로 분기 10m
+
+  routes:
+    # ── SecOps(Loki) 알림: 사실상 한 번만 발송
+    - receiver: "slack-once"
+      matchers:
+        - service="secops"
+      group_by: ['service','alertname']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 999h   # 매우 길게 → 같은 상태에 대해 재알림 사실상 없음
+
+    # ── Infra(Prometheus) 알림: 동일하게 한 번만
+    - receiver: "slack-once"
+      matchers:
+        - service="infra"
+      group_by: ['service','alertname']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 999h
+
+receivers:
+  - name: "slack-default"
+    slack_configs:
+      - send_resolved: true
+        channel: "skill-up"
+        username: "Alert"
+        icon_emoji: "⚓"
+        text: |-
+          [{{ .Status | toUpper }}] {{ (index .Alerts 0).Labels.alertname }}
+          Summary: {{ (index .Alerts 0).Annotations.summary }}
+          Description: {{ (index .Alerts 0).Annotations.description }}
+        api_url: ""
+
+  - name: "slack-once"
+    slack_configs:
+      - send_resolved: false         # 해제 알림도 끔 → “한 번만” 체감
+        channel: "skill-up"
+        username: "Alert"
+        icon_emoji: "⚓"
+        text: |-
+          [{{ .Status | toUpper }}] {{ (index .Alerts 0).Labels.alertname }}
+          Summary: {{ (index .Alerts 0).Annotations.summary }}
+          Description: {{ (index .Alerts 0).Annotations.description }}
+        api_url: ""
+
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+      service: "infra"
+    target_match:
+      severity: "warning"
+      service: "infra"
+    equal: ["instance"]

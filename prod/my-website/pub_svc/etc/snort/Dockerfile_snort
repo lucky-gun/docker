@@ -1,0 +1,14 @@
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Seoul
+
+RUN apt-get update && \
+    apt-get install -y tzdata snort && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    dpkg-reconfigure -f noninteractive tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+# 나머지 스니핑 설정/파일 복사...
+# COPY snort.conf /etc/snort/snort.conf
+# COPY ddos.rules /etc/snort/rules/ddos.rules

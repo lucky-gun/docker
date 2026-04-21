@@ -1,0 +1,11 @@
+FROM nextcloud:latest
+
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends smbclient; \
+    PHPV="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"; \
+    # 1순위: 버전 고정 패키지, 실패하면 2순위: 메타패키지
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "php${PHPV}-smbclient" \
+      || DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends php-smbclient \
+      || true; \
+    rm -rf /var/lib/apt/lists/*

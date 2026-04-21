@@ -1,0 +1,420 @@
+// ───────────────────────────────────────────────────────────────────────────────
+// Loki endpoint (공통)
+// ───────────────────────────────────────────────────────────────────────────────
+loki.write "default" {
+  endpoint {
+    url = "http://10.0.2.100:3100/loki/api/v1/push"
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// 1) Traefik access.log (JSON, 원 IP = ClientHost)
+//    기대 키: time, RequestMethod, DownstreamStatus, RequestPath,
+//             RequestHost, entryPointName, ClientHost
+/////////////////////////////////////////////////////////////////////////////////
+loki.source.file "traefik_access" {
+  targets = [{
+    __path__  = "/var/log/traefik/access.log",
+    service   = "traefik",
+    component = "proxy",
+    stream    = "access",
+    source    = "file:/var/log/traefik/access.log",
+  }]
+  forward_to = [loki.process.traefik_access.receiver]
+}
+
+loki.process "traefik_access" {
+  stage.json {
+    expressions = {
+      ts           = "time",
+      method       = "RequestMethod",
+      status       = "DownstreamStatus",
+      path         = "RequestPath",
+      req_host     = "RequestHost",
+      router       = "RouterName",
+      service_name = "ServiceName",
+      entrypoint   = "entryPointName",
+      client       = "ClientHost",
+    }
+  }
+
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+
+  // status_class: 200/300/400/500 …
+  stage.regex {
+    source     = "status"
+    expression = "^(?P<h>[0-9])"
+  }
+  stage.template {
+    source   = "status_class"
+    template = "{{ .h }}00"
+  }
+
+  // RequestHost에서 포트 제거 → domain (소문자)
+  stage.regex {
+    source     = "req_host"
+    expression = "^(?P<host_only>[^:]+)"
+  }
+  stage.template {
+    source   = "domain"
+    template = "{{ lower .host_only }}"
+  }
+
+  // real_client는 ClientHost 그대로 사용
+  stage.template {
+    source   = "real_client"
+    template = "{{ .client }}"
+  }
+
+  // req_host 라벨도 domain 값으로 통일(대시보드 호환)
+  stage.template {
+    source   = "req_host"
+    template = "{{ .domain }}"
+  }
+
+  // 라벨: 대시보드에서 직접 사용
+  stage.labels {
+    values = {
+      domain       = "",
+      req_host     = "",
+      real_client  = "",
+      method       = "",
+      status       = "",
+      status_class = "",
+      router       = "",
+      service_name = "",
+      entrypoint   = "",
+    }
+  }
+
+  // (선택) path만 메타로 남김 — 원문은 그대로 출력되어 `| json` 가능
+  stage.structured_metadata {
+    values = {
+      path = "",
+    }
+  }
+
+  // 잡음 제거: 메트릭 엔드포인트
+  stage.drop {
+    source     = "path"
+    expression = "^/metrics$"
+  }
+
+  // ✅ 화이트리스트/내부망/루프백/관리자 IP 한 번에 드랍
+  // - 172.20.0.0/24, 172.22.0.0/24, 172.24.0.0/24
+  // - 10.0.0.100, 10.0.2.100
+  // - 210.207.230.67, 217.142.146.137, 146.56.132.38
+  // - 127.0.0.1
+  // 내부/화이트리스트 IP 드랍(환경에 맞게 조정)
+  stage.drop {
+    source     = "real_client"
+    expression = "^(?:172\\.(?:20|22|24)\\.0\\.\\d{1,3}|10\\.0\\.(?:0\\.100|2\\.100)|127\\.0\\.0\\.1|210\\.207\\.230\\.67|217\\.142\\.146\\.137|146\\.56\\.132\\.38)$"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// 2) ModSecurity audit.log (JSON) → has_msg / severity_level / status_class
+/////////////////////////////////////////////////////////////////////////////////
+loki.source.file "modsec_audit" {
+  targets = [{
+    __path__  = "/var/log/modsecurity/audit.log",
+    service   = "modsecurity",
+    component = "waf",
+    stream    = "audit",
+    source    = "file:/var/log/modsecurity/audit.log",
+  }]
+  forward_to = [loki.process.modsec_audit.receiver]
+}
+
+loki.process "modsec_audit" {
+  stage.json {
+    expressions = {
+      ts         = "transaction.time_stamp",
+      method     = "transaction.request.method",
+      uri        = "transaction.request.uri",
+      status     = "transaction.response.http_code",
+
+      client_ip  = "transaction.client_ip",
+      req_host   = "transaction.request.headers.Host",
+      user_agent = "transaction.request.headers.\"User-Agent\"",
+      referer    = "transaction.request.headers.Referer",
+      xff        = "transaction.request.headers.\"X-Forwarded-For\"",
+      x_real_ip  = "transaction.request.headers.\"X-Real-Ip\"",
+      cf_ip      = "transaction.request.headers.\"Cf-Connecting-Ip\"",
+      cf_country = "transaction.request.headers.\"Cf-Ipcountry\"",
+      cf_ray     = "transaction.request.headers.\"Cf-Ray\"",
+
+      msg_count  = "length(transaction.messages)",
+      msg0       = "transaction.messages[0]",
+      unique_id  = "transaction.unique_id",
+      server_id  = "transaction.server_id",
+      host_ip    = "transaction.host_ip",
+      host_port  = "transaction.host_port",
+    }
+  }
+
+  // ModSecurity time_stamp 예: "Mon Sep 15 09:19:59 2025"
+  stage.timestamp {
+    source = "ts"
+    format = "Mon Jan 02 15:04:05 2006"
+    location = "Asia/Seoul"
+  }
+
+  // 첫 메시지 디테일
+  stage.json {
+    source = "msg0"
+    expressions = {
+      rule_id      = "details.ruleId",
+      severity_num = "details.severity",
+      msg_text     = "message",
+
+      match_op     = "details.match",
+      matched_data = "details.data",
+      rule_file    = "details.file",
+      rule_line    = "details.lineNumber",
+      rule_ver     = "details.ver",
+      rule_ref     = "details.reference",
+      rule_acc     = "details.accuracy",
+      rule_mat     = "details.maturity",
+
+      rule_tag0    = "details.tags[0]",
+      rule_tag1    = "details.tags[1]",
+    }
+  }
+
+  // status_class
+  stage.regex {
+    source     = "status"
+    expression = "^(?P<status_h>[0-9])"
+  }
+  stage.template {
+    source   = "status_class"
+    template = "{{ .status_h }}00"
+  }
+
+  // URI 파싱
+  stage.regex {
+    source     = "uri"
+    expression = "^(?P<url_path>[^?]+)(?:\\?(?P<url_query>.*))?$"
+  }
+  stage.regex {
+    source     = "url_path"
+    expression = "\\.(?P<url_ext>[A-Za-z0-9]+)$"
+  }
+
+  // Host → domain(포트 제거, 소문자) + req_host 통일
+  stage.regex {
+    source     = "req_host"
+    expression = "^(?P<host_only>[^:]+)"
+  }
+  stage.template {
+    source   = "domain"
+    template = "{{ lower .host_only }}"
+  }
+  stage.template {
+    source   = "req_host"
+    template = "{{ .domain }}"
+  }
+
+  // 원 IP: XFF 첫 IP → CF-IP → X-Real-IP → client_ip
+  stage.regex {
+    source     = "xff"
+    expression = "^(?P<first_ip>[^,\\s]+)"
+  }
+  stage.template {
+    source   = "origin_ip"
+    template = "{{ or .first_ip (or .cf_ip (or .x_real_ip .client_ip)) }}"
+  }
+
+  // 빈 값 방지
+  stage.replace {
+    source     = "severity_num"
+    expression = "^(?:)$"
+    replace    = "NA"
+  }
+  stage.replace {
+    source     = "rule_id"
+    expression = "^(?:)$"
+    replace    = "NA"
+  }
+  stage.replace {
+    source     = "msg_text"
+    expression = "^(?:)$"
+    replace    = "NA"
+  }
+
+  // severity_num → severity_level
+  stage.template {
+    source   = "severity_level"
+    template = "{{- if eq .severity_num \"0\" -}}EMERGENCY{{- else if eq .severity_num \"1\" -}}ALERT{{- else if eq .severity_num \"2\" -}}CRITICAL{{- else if eq .severity_num \"3\" -}}ERROR{{- else if eq .severity_num \"4\" -}}WARNING{{- else if eq .severity_num \"5\" -}}NOTICE{{- else if eq .severity_num \"6\" -}}INFO{{- else if eq .severity_num \"7\" -}}DEBUG{{- else -}}NA{{- end -}}"
+  }
+  stage.template {
+    source   = "has_msg"
+    template = "{{- if and (ne .rule_id \"NA\") (ne .severity_num \"NA\") -}}1{{- else -}}0{{- end -}}"
+  }
+
+  // 노이즈 드랍: 200 & 메시지없음 / 30x
+  stage.template {
+    source  = "drop_flag"
+    template = "{{ if and (eq .status `200`) (or (eq .msg_count `0`) (eq .has_msg `0`)) }}drop{{ end }}"
+  }
+  stage.drop {
+    source     = "drop_flag"
+    expression = "^drop$"
+  }
+  stage.drop {
+    source     = "status"
+    expression = "^(301|302|304)$"
+  }
+
+  // 대시보드 핵심 라벨
+  stage.labels {
+    values = {
+      domain         = "",
+      req_host       = "",
+      severity_level = "",
+      severity_num   = "",
+      rule_id        = "",
+      status         = "",
+      status_class   = "",
+      cf_country     = "",
+      has_msg        = "",
+    }
+  }
+
+  // 조회 메타
+  stage.structured_metadata {
+    values = {
+      uri         = "",
+      url_path    = "",
+      url_query   = "",
+      url_ext     = "",
+      origin_ip   = "",
+      user_agent  = "",
+      referer     = "",
+      xff         = "",
+      x_real_ip   = "",
+      cf_ip       = "",
+      cf_ray      = "",
+
+      msg_count    = "",
+      msg_text     = "",
+      match_op     = "",
+      matched_data = "",
+      rule_file    = "",
+      rule_line    = "",
+      rule_ver     = "",
+      rule_ref     = "",
+      rule_acc     = "",
+      rule_mat     = "",
+      rule_tag0    = "",
+      rule_tag1    = "",
+
+      unique_id = "",
+      server_id = "",
+      client_ip = "",
+      host_ip   = "",
+      host_port = "",
+    }
+  }
+
+  // 출력 포맷(대시보드 정규식과 호환)
+  stage.template {
+    source  = "line_fmt"
+    template = "sev={{.severity_num}}({{.severity_level}}) status={{.status}} uri={{.uri}} rule={{.rule_id}} msg={{.msg_text}} src={{.origin_ip}} country={{.cf_country}}"
+  }
+  stage.output {
+    source = "line_fmt"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// 3) Fail2ban → action(=ban/unban/restore ban…) / jail / ip
+//    샘플: " 2025-09-15 18:37:15,079 FFFFA854AB08 NOTIC [tf-pb] Restore Ban 1.2.3.4"
+/////////////////////////////////////////////////////////////////////////////////
+loki.source.file "fail2ban" {
+  targets = [{
+    __path__  = "/var/log/fail2ban/fail2ban.log",
+    service   = "fail2ban",
+    component = "jail",
+    stream    = "main",
+    source    = "file:/var/log/fail2ban/fail2ban.log",
+  }]
+  forward_to = [loki.process.fail2ban.receiver]
+}
+
+loki.process "fail2ban" {
+  // 0) 선행 공백 제거
+  stage.replace {
+    expression = "^[\\s]+"
+    replace    = ""
+  }
+
+  // 1) 멀티라인 (첫 줄이 날짜로 시작)
+  stage.multiline {
+    firstline     = "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"
+    max_wait_time = "10s"
+  }
+
+  // 2) 타임스탬프 캡처/적용: "YYYY-MM-DD HH:MM:SS,mmm"
+  stage.regex {
+    expression = "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d{3})"
+  }
+  stage.timestamp {
+    source   = "ts"
+    format   = "2006-01-02 15:04:05,000"
+    location = "Asia/Seoul"
+  }
+
+  // 3) LEVEL 추출(대괄호 '[' 직전의 대문자 토큰), 소문자화
+  stage.regex {
+    expression = "\\s(?P<level>[A-Z]{3,})\\s+\\["
+  }
+  stage.template {
+    source   = "level"
+    template = "{{ lower .Value }}"
+  }
+
+  // 4-A) [jail] <action> <ip> (restore/ban/unban/found)
+  stage.regex {
+    expression = "(?i)\\[(?P<jail>[^\\]]+)\\]\\s+(?P<action>restore\\s+ban|ban|unban|found)\\s+(?P<ip>(?:\\d{1,3}(?:\\.\\d{1,3}){3}|[0-9A-Fa-f:]+))"
+  }
+
+  // 4-B) [jail] <ip> already ban(ned)
+  stage.regex {
+    expression = "(?i)\\[(?P<jail>[^\\]]+)\\]\\s+(?P<ip>(?:\\d{1,3}(?:\\.\\d{1,3}){3}|[0-9A-Fa-f:]+))\\s+(?P<action>already\\s+ban(?:ned)?)\\b"
+  }
+
+  // 5) 액션 정규화: restore ban / already ban(ded) -> ban
+  stage.template {
+    source   = "action"
+    template = "{{- $a := lower .Value -}}{{- if or (eq $a \"restore ban\") (eq $a \"already ban\") (eq $a \"already banned\") -}}ban{{- else -}}{{$a}}{{- end -}}"
+  }
+
+  // 6) 최종 라벨 확정 (템플릿으로 명시)
+  stage.labels {
+    values = {
+      jail   = "",
+      action = "",
+      ip     = "",
+      level  = "",
+    }
+  }
+
+  // 7) 불필요 라벨 정리(원하면 추가)
+  stage.label_drop { values = ["filename"] }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// (제거됨) Snort, 각 서비스들: 대시보드에서 사용하지 않으므로 전체 삭제
+// ───────────────────────────────────────────────────────────────────────────────
+

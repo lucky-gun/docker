@@ -1,0 +1,2 @@
+flask
+gunicorn # RUN apk add --no-cache py3-gunicorn py3-flask

@@ -1,0 +1,280 @@
+services:
+  my_mysql:
+    image: mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=
+      - TZ=Asia/Seoul
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - ./mysql/config:/etc/mysql/conf.d
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 50
+      start_period: 30s
+    networks:
+      - pv_net
+
+  my_dbgate:
+    image: dbgate/dbgate
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_HOST=my_mysql
+      - TZ=Asia/Seoul
+    volumes:
+      - ./dbgate:/root/.dbgate
+    networks:
+      - pv_net
+
+  my_portainer:
+    image: portainer/portainer
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "9000:9000"
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./portainer:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - pv_net
+
+  my_cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Seoul
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run
+      - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro         # cgroups v2 환경이면 이 줄도 유용
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro       # ★ 추가
+    networks:
+      - pv_net
+
+  my_node_exporter:
+    image: prom/node-exporter
+    restart: unless-stopped
+    pid: host
+    environment:
+      - TZ=Asia/Seoul
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --path.udev.data=/run/udev/data # ← (선택) 경로 명시
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /run/udev:/run/udev:ro          # ← 추가: 호스트 udev DB
+    networks:
+      - pv_net
+
+  my_prometheus:
+    image: prom/prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    environment:
+      - TZ=Asia/Seoul
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d   # 보존기간 예시
+      - --storage.tsdb.wal-compression
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/config:/etc/prometheus:ro
+      - ./prometheus/data:/prometheus
+    depends_on:
+      - my_cadvisor
+    extra_hosts:
+      - nodeexporter.lucky-gun.com:10.0.0.100
+      - cadvisor.lucky-gun.com:10.0.0.100
+    networks:
+      - pv_net
+
+  my_grafana:
+    image: grafana/grafana
+    restart: unless-stopped
+    ports:
+      - "3010:3000"
+    env_file: ./grafana/.env
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - pv_net
+
+  my_alertmanager:
+    image: prom/alertmanager
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    networks:
+      - pv_net
+
+  my_loki:
+    image: grafana/loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      - TZ=Asia/Seoul
+    command:
+      - -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki/config.yaml:/etc/loki/local-config.yaml:ro
+      - ./loki/var:/var/loki
+      - ./loki/rulestorage:/etc/loki/rulestorage
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - pv_net
+
+
+  ##################################
+  # NEXTCLOUD 영역
+  ##################################
+
+  my_nextcloud:
+    build:
+      context: ./nextcloud
+      dockerfile: Dockerfile_nextcloud
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/run/apache2
+    env_file: ./nextcloud/.env
+    volumes:
+      - ./nextcloud/data:/var/www/html/data
+      - ./nextcloud/config:/var/www/html/config
+      - ./nextcloud/custom_apps:/var/www/html/custom_apps
+      - ./nextcloud/themes:/var/www/html/themes
+    depends_on:
+      my_redis:
+        condition: service_started
+      my_mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q \"'installed' => true\" /var/www/html/config/config.php || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    networks:
+      - pv_net
+
+  my_nextcloud_api_proxy:
+    image: ghcr.io/nextcloud/nextcloud-appapi-dsp:release
+    environment:
+      - NC_HAPROXY_PASSWORD=
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "2375"
+    depends_on:
+      my_nextcloud:
+        condition: service_healthy
+    networks:
+      pv_net:
+        aliases:
+          - docker-socket-proxy  ## 물론 나중 연결 시 host에 docker-socket-proxy:2375가 아닌 my_nextcloud_api_proxy로 서비스명으로 진행해도 괜찮습니다.
+          
+  my_redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    environment:
+      - TZ=Asia/Seoul
+    command: >
+      redis-server
+      --appendonly no
+      --save 60 1000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ""
+      --protected-mode yes
+      --bind 0.0.0.0
+    networks:
+      - pv_net
+
+  my_notify_push:
+    profiles:
+      - install
+    build:
+      context: https://github.com/nextcloud/notify_push.git#main
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "7867:7867"
+    environment:
+      - NEXTCLOUD_URL=http://my_nextcloud:80
+      - TZ=Asia/Seoul
+    entrypoint: ["/notify_push"]
+    command: ["/var/www/html/config/config.php"]
+    volumes:
+      - ./nextcloud/config:/var/www/html/config:ro
+    depends_on:
+      - my_nextcloud
+      - my_redis
+    networks:
+      - pv_net
+
+  my_nextcloud_cron:
+    profiles: ["install"]
+    build:
+      context: ./nextcloud
+      dockerfile: Dockerfile_nextcloud
+    restart: unless-stopped
+    # entrypoint/command 중 하나만 쓰면 됩니다. 아래처럼 entrypoint로 래핑:
+    entrypoint: ["/bin/sh","-lc",
+      "cp -an /usr/src/nextcloud/. /var/www/html \
+       && chown -R 33:33 /var/www/html \
+       && exec /cron.sh"
+    ]
+    volumes:
+      - ./nextcloud/data:/var/www/html/data
+      - ./nextcloud/config:/var/www/html/config
+      - ./nextcloud/custom_apps:/var/www/html/custom_apps
+      - ./nextcloud/themes:/var/www/html/themes
+    depends_on:
+      my_nextcloud:
+        condition: service_healthy
+    networks: [pv_net]
+
+networks:
+  pv_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.0.0/16
+    internal: false

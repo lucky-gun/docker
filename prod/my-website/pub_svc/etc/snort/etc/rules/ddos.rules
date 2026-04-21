@@ -1,0 +1,26 @@
+# SYN flood (80,443,3000 예시)
+alert tcp $EXTERNAL_NET any -> $HOME_NET [80,443,3000] \
+ (msg:"[DDoS] SYN flood to web"; flags:S; flow:stateless; \
+  detection_filter:track by_src, count 60, seconds 1; \
+  sid:1001001; rev:1;)
+
+# TLS ClientHello flood (443,3000 예시)
+alert tcp $EXTERNAL_NET any -> $HOME_NET [443,3000] \
+ (msg:"[DDoS] TLS ClientHello flood"; flow:to_server,established; \
+  content:"|16|"; depth:1; content:"|03|"; offset:1; depth:1; \
+  content:"|01|"; offset:5; depth:1; \
+  detection_filter:track by_src, count 40, seconds 2; \
+  sid:1001002; rev:1;)
+
+# ICMP echo flood
+alert icmp $EXTERNAL_NET any -> $HOME_NET any \
+ (msg:"[DDoS] ICMP echo flood"; itype:8; \
+  detection_filter:track by_src, count 200, seconds 10; \
+  sid:1001003; rev:1;)
+
+
+# (선택) QUIC/HTTP3 대량 UDP - 사용 환경에서만
+# alert udp $EXTERNAL_NET any -> $HOME_NET 443 \
+#  (msg:"[DDoS] Possible QUIC/HTTP3 UDP flood"; \
+#   detection_filter:track by_src, count 1500, seconds 10; \
+#   classtype:attempted-dos; sid:1001004; rev:1;)

@@ -1,0 +1,15 @@
+  my_mysql_backup:
+    image: fradelg/mysql-cron-backup
+    env_file: ./mysql_backup/.env
+    volumes:
+      - ./mysql_backup/backup:/backup
+    networks:
+      - pv_net
+
+#.env
+MYSQL_HOST=my_mysql
+MYSQL_USER=root
+MYSQL_PASSWORD=root1234!
+MYSQLDUMP_DATABASE=wordpress_db nextcloud_db mediawiki_db
+CRON_TIME=0 3 * * *
+MAX_BACKUPS=7

@@ -1,0 +1,70 @@
+# static config (traefik.yml)
+entryPoints:
+  websecure:
+    address: ":443"
+    forwardedHeaders:
+      trustedIPs:
+$TRUSTED_CLOUDFLARE_IPS
+
+  web:
+    address: ":80"
+    forwardedHeaders:
+      trustedIPs:
+$TRUSTED_CLOUDFLARE_IPS
+
+  metrics:
+    address: ":8082"
+
+api:
+  dashboard: true
+  insecure: false
+
+certificatesResolvers:
+  myresolver:
+    acme:
+      email: 
+      storage: /etc/traefik/letsencrypt/acme.json
+      dnsChallenge:
+        provider: cloudflare
+        delayBeforeCheck: 0
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+      #httpChallenge:
+      #  entryPoint: web
+
+tls:
+  certificates:
+    - certResolver: myresolver
+      domains:
+        - main: "*.lucky-gun.com"
+          sans:
+            - lucky-gun.com
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic_conf/active
+    watch: true
+  docker:
+    exposedByDefault: false
+
+log:
+  level: INFO
+  format: common
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        Cf-Connecting-Ip: keep
+        X-Forwarded-For: keep
+        User-Agent: keep
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addRoutersLabels: true

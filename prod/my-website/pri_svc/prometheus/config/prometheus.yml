@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - 'rules.yml'
+
+scrape_configs:
+  - job_name: 'pri_prometheus'
+    static_configs:
+      - targets: ["my_prometheus:9090"]
+
+  - job_name: 'pri_node_exporter'
+    static_configs:
+      - targets: ["my_node_exporter:9100"]
+
+  - job_name: 'pri_cadvisor'
+    static_configs:
+      - targets: ["my_cadvisor:8080"]
+
+  - job_name: 'pub_node_exporter'
+    static_configs:
+      - targets: ["nodeexporter.lucky-gun.com"]
+    scheme: https
+
+  - job_name: 'pub_cadvisor'
+    static_configs:
+      - targets: ["cadvisor.lucky-gun.com"]
+    scheme: https
+
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ["10.0.0.100:8082"]
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["my_alertmanager:9093"]

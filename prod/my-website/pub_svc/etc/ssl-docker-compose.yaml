@@ -1,0 +1,16 @@
+services:
+  my_traefik:
+    image: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8082:8082"
+    environment:
+      - CF_DNS_API_TOKEN=
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/log:/var/log/traefik
+      - ./traefik/data:/etc/traefik

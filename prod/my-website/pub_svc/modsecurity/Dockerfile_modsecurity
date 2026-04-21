@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1.6
+ARG NGINX_VERSION=1.28.0      # 또는 1.29.1 (mainline)로 교체 가능
+ARG MODSEC_VERSION=v3.0.14
+ARG CRS_VERSION=4.17.1
+ARG NC_PLUGIN_VERSION=v1.4.0   # Nextcloud 플러그인 버전
+ARG WP_PLUGIN_VERSION=v1.1.0   # WordPress 플러그인 버전
+
+# ---------- build ----------
+FROM alpine:3.21 AS build
+ARG NGINX_VERSION MODSEC_VERSION
+WORKDIR /tmp
+
+RUN apk add --no-cache \
+  git build-base autoconf automake libtool pkgconfig \
+  pcre-dev pcre2-dev zlib-dev libxml2-dev yajl-dev \
+  curl-dev curl bash linux-headers libmaxminddb-dev
+
+# 1) libmodsecurity 빌드
+RUN git clone --depth 1 -b ${MODSEC_VERSION} https://github.com/owasp-modsecurity/ModSecurity && \
+    cd ModSecurity && git submodule update --init --depth 1 && \
+    ./build.sh && ./configure && make -j"$(nproc)" && make install
+
+# 2) nginx용 동적 모듈 빌드
+RUN git clone --depth 1 https://github.com/SpiderLabs/ModSecurity-nginx.git /tmp/modsec-nginx && \
+    curl -fsSLO https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz && \
+    tar xzf nginx-${NGINX_VERSION}.tar.gz && cd nginx-${NGINX_VERSION} && \
+    ./configure --with-compat --add-dynamic-module=/tmp/modsec-nginx && \
+    make modules && cp objs/ngx_http_modsecurity_module.so /tmp/ngx_http_modsecurity_module.so
+
+# 3) libmodsecurity(.so*) 스테이징 (설치 경로 편차 흡수)
+RUN mkdir -p /tmp/libmodsec-stage && \
+    ( [ -d /usr/local/modsecurity/lib ] && cp -av /usr/local/modsecurity/lib/libmodsecurity.so* /tmp/libmodsec-stage/ || true ) && \
+    ( [ -d /usr/local/lib ]            && cp -av /usr/local/lib/libmodsecurity.so*            /tmp/libmodsec-stage/ || true ) && \
+    ls -l /tmp/libmodsec-stage
+
+# ---------- runtime ----------
+FROM nginx:${NGINX_VERSION}-alpine AS runtime
+ARG CRS_VERSION NC_PLUGIN_VERSION WP_PLUGIN_VERSION
+
+# 런타임 의존성
+RUN apk add --no-cache libstdc++ pcre pcre2 libxml2 yajl curl libmaxminddb && \
+    mkdir -p /etc/nginx/modules /etc/modsecurity /etc/modsecurity/crs /etc/modsecurity/crs/plugins /var/log/modsecurity
+
+# libmodsecurity 배치 + 로더 심링크
+COPY --from=build /tmp/libmodsec-stage/libmodsecurity.so* /usr/local/lib/
+RUN ln -sf /usr/local/lib/libmodsecurity.so.3 /usr/lib/libmodsecurity.so.3 || true && \
+    ln -sf /usr/local/lib/libmodsecurity.so    /usr/lib/libmodsecurity.so    || true
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/lib
+
+# nginx 모듈 배치 (nginx.conf의 load_module 경로와 일치)
+COPY --from=build /tmp/ngx_http_modsecurity_module.so /etc/nginx/modules/ngx_http_modsecurity_module.so
+
+# CRS 설치
+RUN curl -fsSL https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz \
+  | tar xz --strip-components=1 -C /etc/modsecurity/crs && \
+  cp /etc/modsecurity/crs/crs-setup.conf.example /etc/modsecurity/crs/crs-setup.conf
+
+# ▶ Nextcloud / WordPress 플러그인 설치 (plugins/*-config/before/after.conf 일체 복사)
+RUN curl -fsSL https://github.com/coreruleset/nextcloud-rule-exclusions-plugin/archive/refs/tags/${NC_PLUGIN_VERSION}.tar.gz \
+      | tar xz -C /tmp && \
+    cp /tmp/nextcloud-rule-exclusions-plugin-*/plugins/*.conf /etc/modsecurity/crs/plugins/ && \
+    curl -fsSL https://github.com/coreruleset/wordpress-rule-exclusions-plugin/archive/refs/tags/${WP_PLUGIN_VERSION}.tar.gz \
+      | tar xz -C /tmp && \
+    cp /tmp/wordpress-rule-exclusions-plugin-*/plugins/*.conf /etc/modsecurity/crs/plugins/
+
+# 로그 권한
+RUN chown -R nginx:nginx /var/log/modsecurity

@@ -1,0 +1,140 @@
+tls:
+  options:
+    default:              # ← 이름이 default면 전 라우터 기본값
+      minVersion: VersionTLS13
+      sniStrict: true
+
+http:
+  middlewares:
+    only-cloudflare:
+      ipAllowList:
+        sourceRange:
+          - "173.245.48.0/20"
+          - "103.21.244.0/22"
+          - "103.22.200.0/22"
+          - "103.31.4.0/22"
+          - "141.101.64.0/18"
+          - "108.162.192.0/18"
+          - "190.93.240.0/20"
+          - "188.114.96.0/20"
+          - "197.234.240.0/22"
+          - "198.41.128.0/17"
+          - "162.158.0.0/15"
+          - "104.16.0.0/13"
+          - "104.24.0.0/14"
+          - "172.64.0.0/13"
+          - "131.0.72.0/22"
+
+    ip-whitelist:
+      ipAllowList:                # ← 권장 표기 (소문자 i)
+        sourceRange:
+        ipStrategy:
+          depth: 1
+
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+        #chain-secure:
+        #chain:
+        #middlewares:
+        # - rate-limit
+        # - secure-headers
+        # - forward-auth
+
+    redirect-www-to-apex:
+      redirectRegex:
+        regex: "^https?://www\\.lucky-gun\\.com(.*)"
+        replacement: "https://lucky-gun.com$1"
+        permanent: true
+
+    rate-limit:
+      rateLimit:
+        average: 200
+        burst: 600
+        period: 1s
+
+    rate-limit-login:
+      rateLimit:
+        average: 10
+        burst: 20
+        period: 1s
+
+    secure-headers-mw:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        referrerPolicy: "same-origin"
+        contentTypeNosniff: true
+        contentSecurityPolicy: >
+          default-src 'self' https:;
+          img-src 'self' data: blob: https:;
+          frame-ancestors 'self';
+          object-src 'none';
+
+    secure-headers-gf:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: false       # 서브도메인 전체 HSTS 강제 원치 않으면 false
+        stsPreload: false                 # preload는 apex에서만 고려
+        referrerPolicy: "same-origin"
+        contentTypeNosniff: true
+        # 임베딩 허용 도메인(예시: 내부 서비스 2곳만)
+        contentSecurityPolicy: >
+          default-src 'self' https:;
+          img-src 'self' data: blob: https:;
+          script-src 'self';               # Grafana 플러그인/패널에 따라 조정 필요
+          style-src 'self' 'unsafe-inline'; # Grafana 기본 테마/스타일 호환
+          connect-src 'self' https: wss:;
+          font-src 'self' data:;
+          frame-ancestors 'self' https://console.lucky-gun.com https://bi.lucky-gun.com;
+          object-src 'none';
+
+    # 보안 헤더 묶음 (WordPress 호환 버전)
+    secure-headers-wp:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        referrerPolicy: "same-origin"
+        contentTypeNosniff: true
+        # 권장 추가 헤더
+        permissionsPolicy: "geolocation=(), camera=(), microphone=(), midi=(), usb=(), payment=(), fullscreen=(self), browsing-topics=()"
+        customResponseHeaders:
+          crossOriginOpenerPolicy: "same-origin"
+          crossOriginResourcePolicy: "same-site"
+        # CSP (필요 외부 도메인은 점진적으로 추가)
+        contentSecurityPolicy: >
+          upgrade-insecure-requests;
+          default-src 'self' https:;
+          script-src  'self' 'unsafe-inline' https: s.w.org ajax.googleapis.com cdnjs.cloudflare.com;
+          # 가능하다면 'unsafe-eval' 제거 검토 (플러그인 호환 확인)
+          style-src   'self' 'unsafe-inline' https: fonts.googleapis.com s.w.org;
+          font-src    'self' data: https: fonts.gstatic.com;
+          img-src     'self' data: blob: https: secure.gravatar.com i0.wp.com i1.wp.com i2.wp.com s.w.org;
+          connect-src 'self' https: wss: blob:;
+          worker-src  'self' blob:;
+          frame-ancestors 'self';
+          object-src 'none';
+          base-uri 'none';
+          form-action 'self';
+
+    # Nextcloud용 임베드 허용 미들웨어
+    secure-headers-nc:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        referrerPolicy: "same-origin"
+        contentTypeNosniff: true
+
+#headers:
+#frameDeny: true
+#contentTypeNosniff: true
+#browserXssFilter: true
+#referrerPolicy: "no-referrer-when-downgrade"
+#stsSeconds: 15552000
+#stsIncludeSubdomains: true
+#stsPreload: true

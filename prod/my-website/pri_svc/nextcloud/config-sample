@@ -1,0 +1,76 @@
+[opc@private-infra pri_svc]$ sudo cat nextcloud/config/config.php 
+<?php
+$CONFIG = array (
+  'htaccess.RewriteBase' => '/',
+  'memcache.local' => '\\OC\\Memcache\\APCu',
+  'apps_paths' => 
+  array (
+    0 => 
+    array (
+      'path' => '/var/www/html/apps',
+      'url' => '/apps',
+      'writable' => false,
+    ),
+    1 => 
+    array (
+      'path' => '/var/www/html/custom_apps',
+      'url' => '/custom_apps',
+      'writable' => true,
+    ),
+  ),
+  'memcache.distributed' => '\\OC\\Memcache\\Redis',
+  'memcache.locking' => '\\OC\\Memcache\\Redis',
+  'redis' => 
+  array (
+    'host' => 'my_redis',
+    'password' => 'redis_pass',
+    'port' => 6379,
+  ),
+  'upgrade.disable-web' => true,
+  'passwordsalt' => 'kvxxekrbLo8HFffdWdIez5SRErlWwQ',
+  'secret' => 'OWTQyZCsJNrpbMe5ezZhUnVkpm/woZiG+GyyKKRkvfKrGlvB',
+  'trusted_domains' => 
+  array (
+    0 => 'cloud.lucky-gun.com',
+  ),
+  'datadirectory' => '/var/www/html/data',
+  'dbtype' => 'mysql',
+  'version' => '32.0.0.13',
+  'overwrite.cli.url' => 'https://cloud.lucky-gun.com',
+  'overwritehost' => 'cloud.lucky-gun.com',
+  'overwriteprotocol' => 'https',
+  'trusted_proxies' => 
+  array (
+    0 => '192.168.0.0/16',
+    1 => '217.142.146.137/32',
+    2 => '146.56.132.38/32',
+    3 => '210.207.230.67/32',
+    4 => '10.0.0.0/16',
+    5 => '173.245.48.0/20',
+    6 => '103.21.244.0/22',
+    7 => '103.22.200.0/22',
+    8 => '103.31.4.0/22',
+    9 => '141.101.64.0/18',
+    10 => '108.162.192.0/18',
+    11 => '190.93.240.0/20',
+    12 => '188.114.96.0/20',
+    13 => '197.234.240.0/22',
+    14 => '198.41.128.0/17',
+    15 => '162.158.0.0/15',
+    16 => '104.16.0.0/13',
+    17 => '104.24.0.0/14',
+    18 => '172.64.0.0/13',
+    19 => '131.0.72.0/22',
+  ),
+  'dbname' => 'nextcloud_db',
+  'dbhost' => 'my_mysql',
+  'dbtableprefix' => 'oc_',
+  'mysql.utf8mb4' => true,
+  'dbuser' => 'next_admin',
+  'dbpassword' => 'next_pass',
+  'installed' => true,
+  'instanceid' => 'oczqjvdl8cay',
+  'maintenance_window_start' => 17,
+  'maintenance' => false,
+  'default_phone_region' => 'KR',
+);

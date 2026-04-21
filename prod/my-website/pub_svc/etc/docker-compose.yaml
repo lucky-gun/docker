@@ -1,0 +1,76 @@
+services:
+  my_alloy:
+    image: grafana/alloy
+    restart: unless-stopped
+    user: root
+    cap_add:
+      - SYSLOG
+    environment:
+      - TZ=Asia/Seoul
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.river
+    volumes:
+      - ./alloy/config.river:/etc/alloy/config.river:ro
+      - ./alloy/data:/var/lib/alloy/data
+
+      # 도커 로그 (컨테이너 로그 수집)
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # 시스템 로그
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+
+      # Apache (WordPress 등 공용)
+      - ./wordpress/log/access.log:/var/log/wordpress/access.log:ro
+      - ./wordpress/log/error.log:/var/log/wordpress/error.log:ro
+
+      # MediaWiki 디버그 로그
+      - ./mediawiki/log/access.log:/var/log/mediawiki/access.log:ro
+      - ./mediawiki/log/error.log:/var/log/mediawiki/error.log:ro
+
+      # ModSecurity 로그
+      - ./modsecurity/log/audit.log:/var/log/modsecurity/audit.log:ro
+
+      # Fail2Ban 로그
+      - ./fail2ban/config/log/fail2ban/fail2ban.log:/var/log/fail2ban/fail2ban.log:ro
+
+      # Traefik 로그
+      - ./traefik/log/access.log:/var/log/traefik/access.log:ro
+    networks:
+      - monitoring
+      - frontend
+
+  my_snort:
+    build:
+      context: ./snort
+      dockerfile: Dockerfile_snort
+    privileged: true
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./snort/log:/var/log/snort:rw
+      - ./snort/etc:/etc/snort
+    command: snort -i enp0s6 -q -c /etc/snort/snort.conf
+
+  my_file_backup:
+    image: offen/docker-volume-backup
+    restart: always
+    env_file: ./file_backup/.env
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./wordpress:/data/wordpress:ro
+      - ./nextcloud:/data/nextcloud:ro
+      - ./mediawiki:/data/mediawiki:ro
+      - ./file_backup/backup:/backup
+    networks:
+      - monitoring

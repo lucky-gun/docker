@@ -1,0 +1,6 @@
+FROM php:7.4-fpm
+
+WORKDIR /var/www/html
+COPY ./nginx/html .
+RUN echo "security.limit_extensions = .php .phtml .php3 .php4 .php5 .html .htm" >> /usr/local/etc/php-fpm.d/www.conf
+CMD ["php-fpm"]
