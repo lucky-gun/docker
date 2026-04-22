@@ -1,4 +1,4 @@
-# Kubernetes Repository
+# Docker Repository
 
 <img src="./docs/title-image.png" width="700"/>
 
